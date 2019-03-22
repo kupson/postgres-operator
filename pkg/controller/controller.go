@@ -50,6 +50,8 @@ type Controller struct {
 	nodesInformer      cache.SharedIndexInformer
 	podCh              chan cluster.PodEvent
 
+	podEnvironmentSecretInformer cache.SharedIndexInformer
+
 	clusterEventQueues    []*cache.FIFO // [workerID]Queue
 	lastClusterSyncTime   int64
 	lastClusterRepairTime int64
@@ -342,6 +344,26 @@ func (c *Controller) initSharedInformers() {
 		UpdateFunc: c.nodeUpdate,
 		DeleteFunc: c.nodeDelete,
 	})
+
+	// Secret populating Pods Environment (pod_environment_secret_name config option)
+	if c.opConfig.PodEnvironmentSecretName != "" {
+		podEnvironmentSecretLw := &cache.ListWatch{
+			ListFunc:  c.podEnvironmentSecretListFunc,
+			WatchFunc: c.podEnvironmentSecretWatchFunc,
+		}
+
+		c.podEnvironmentSecretInformer = cache.NewSharedIndexInformer(
+			podEnvironmentSecretLw,
+			&v1.Secret{},
+			constants.QueueResyncPeriodPodEnv,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+
+		c.podEnvironmentSecretInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc:    c.podEnvironmentSecretAdd,
+			UpdateFunc: c.podEnvironmentSecretUpdate,
+			DeleteFunc: c.podEnvironmentSecretDelete,
+		})
+	}
 }
 
 // Run starts background controller processes
@@ -360,8 +382,9 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup) {
 		panic("could not acquire initial list of clusters")
 	}
 
-	wg.Add(5)
+	wg.Add(6)
 	go c.runPodInformer(stopCh, wg)
+	go c.runPodEnvironmentSecretInfrormer(stopCh, wg)
 	go c.runPostgresqlInformer(stopCh, wg)
 	go c.clusterResync(stopCh, wg)
 	go c.apiserver.Run(stopCh, wg)
@@ -374,6 +397,14 @@ func (c *Controller) runPodInformer(stopCh <-chan struct{}, wg *sync.WaitGroup) 
 	defer wg.Done()
 
 	c.podInformer.Run(stopCh)
+}
+
+func (c *Controller) runPodEnvironmentSecretInfrormer(stopCh <-chan struct{}, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	if c.podEnvironmentSecretInformer != nil {
+		c.podEnvironmentSecretInformer.Run(stopCh)
+	}
 }
 
 func (c *Controller) runPostgresqlInformer(stopCh <-chan struct{}, wg *sync.WaitGroup) {

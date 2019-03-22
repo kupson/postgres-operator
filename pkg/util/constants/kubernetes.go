@@ -10,7 +10,8 @@ const (
 	StatefulsetDeletionInterval = 1 * time.Second
 	StatefulsetDeletionTimeout  = 30 * time.Second
 
-	QueueResyncPeriodPod  = 5 * time.Minute
-	QueueResyncPeriodTPR  = 5 * time.Minute
-	QueueResyncPeriodNode = 5 * time.Minute
+	QueueResyncPeriodPod    = 5 * time.Minute
+	QueueResyncPeriodPodEnv = 5 * time.Minute
+	QueueResyncPeriodTPR    = 5 * time.Minute
+	QueueResyncPeriodNode   = 5 * time.Minute
 )
