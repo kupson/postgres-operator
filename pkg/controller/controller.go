@@ -50,7 +50,8 @@ type Controller struct {
 	nodesInformer      cache.SharedIndexInformer
 	podCh              chan cluster.PodEvent
 
-	podEnvironmentSecretInformer cache.SharedIndexInformer
+	podEnvironmentSecretInformer    cache.SharedIndexInformer
+	podEnvironmentConfigMapInformer cache.SharedIndexInformer
 
 	clusterEventQueues    []*cache.FIFO // [workerID]Queue
 	lastClusterSyncTime   int64
@@ -345,6 +346,26 @@ func (c *Controller) initSharedInformers() {
 		DeleteFunc: c.nodeDelete,
 	})
 
+	// ConfigMap populating Pods Environment (pod_environment_configmap config option)
+	if c.opConfig.PodEnvironmentConfigMap != "" {
+		podEnvironmentConfigMapLw := &cache.ListWatch{
+			ListFunc:  c.podEnvironmentConfigMapListFunc,
+			WatchFunc: c.podEnvironmentConfigMapWatchFunc,
+		}
+
+		c.podEnvironmentConfigMapInformer = cache.NewSharedIndexInformer(
+			podEnvironmentConfigMapLw,
+			&v1.ConfigMap{},
+			constants.QueueResyncPeriodPodEnv,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+
+		c.podEnvironmentConfigMapInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc:    c.podEnvironmentConfigMapAdd,
+			UpdateFunc: c.podEnvironmentConfigMapUpdate,
+			DeleteFunc: c.podEnvironmentConfigMapDelete,
+		})
+	}
+
 	// Secret populating Pods Environment (pod_environment_secret_name config option)
 	if c.opConfig.PodEnvironmentSecretName != "" {
 		podEnvironmentSecretLw := &cache.ListWatch{
@@ -382,8 +403,9 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup) {
 		panic("could not acquire initial list of clusters")
 	}
 
-	wg.Add(6)
+	wg.Add(7)
 	go c.runPodInformer(stopCh, wg)
+	go c.runPodEnvironmentConfigMapInfrormer(stopCh, wg)
 	go c.runPodEnvironmentSecretInfrormer(stopCh, wg)
 	go c.runPostgresqlInformer(stopCh, wg)
 	go c.clusterResync(stopCh, wg)
@@ -397,6 +419,14 @@ func (c *Controller) runPodInformer(stopCh <-chan struct{}, wg *sync.WaitGroup) 
 	defer wg.Done()
 
 	c.podInformer.Run(stopCh)
+}
+
+func (c *Controller) runPodEnvironmentConfigMapInfrormer(stopCh <-chan struct{}, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	if c.podEnvironmentConfigMapInformer != nil {
+		c.podEnvironmentConfigMapInformer.Run(stopCh)
+	}
 }
 
 func (c *Controller) runPodEnvironmentSecretInfrormer(stopCh <-chan struct{}, wg *sync.WaitGroup) {
